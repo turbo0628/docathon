@@ -4,46 +4,17 @@ sidebar_position: 2
 
 # Fields (advanced)
 
-<!-- In this article, we discuss the advanced topics about Taichi field.  -->
-It is generally recognized that memory pose great impact on program performance. Two important questions are frequently asked: how to reduce memory occupancy and how to organize a faster data layout. In this article, we discuss the two questions in the scope of Taichi field. A better understanding of mechanisms under the hood could yield amazing performance of your Taichi program.
+As is already widely recognized, memory access has great impact on program performance. Two frequently asked questions are: how to reduce memory occupancy and how to organize a faster data layout. In this article, we discuss the two questions in the scope of Taichi field. A better understanding of mechanism under the hood is essential to write blazing fast Taichi programs.
 
-<!-- Field is the major data structure to organize buffers. As , we take a look at the mechanism under the hood: how to reduce memory usage, how to organize a btter layout so that . -->
+If you feel confused about the basic concepts of Taichi, please refer to the basic document [Fields (basic)](../basic/field).
 
-<!-- Three major topics will be covered: the packed mode, the data layouts and the dynamic data buffer allocations. -->
-If you are not familiar with basic concepts of Taichi fields, please refer to the basic document [Fields (basic)](../basic/field).
-
-
-<!-- ## Packed mode
-
-By default, all non-power-of-two dimensions of a field are automatically
-padded to a power of two. For instance, a field of shape `(18, 65)` will
-have an internal shape of `(32, 128)`. Although the padding has many benefits
-such as allowing fast and convenient bitwise operations for coordinate handling,
-it will consume potentially much more memory than expected.
-
-If you would like to reduce memory usage, you can use the optional packed
-mode. In packed mode, no padding is applied such that a field does not have a
-larger internal shape than the defined shape when some of its dimensions
-are not powers of two. The downside is that the runtime performance will
-regress slightly.
-
-A switch named `packed` for `ti.init()` decides whether to use packed mode:
-
-```python
-ti.init()  # default: packed=False
-a = ti.field(ti.i32, shape=(18, 65))  # padded to (32, 128)
-```
-
-```python
-ti.init(packed=True)
-a = ti.field(ti.i32, shape=(18, 65))  # no padding
-``` -->
 
 ## Data layouts
 
-Morden processor cores are orders of magnitude faster than their equipped memory systems. In quite a few scanrios, programs are bound by the speed of memory rather than processors.
-Regarding this fact, Taichi's design emphasis the capability to organize data structures in efficient memory layouts. 
-The performance of Taichi programs can benefit from a wisely-chosen field layout, and suffer from loosely organized buffers. This is especially important when dealing with large fields. This section is organized as follows: we first introduce the pricinples, then play basic Taichi , and at last ...
+Morden processor cores are orders of magnitude faster than their equipped memory systems. In quite a few scenarios, programs are bound by the speed of memory rather than cores.
+Regarding this fact, Taichi's design puts great emphasis on the capability to organize data structures into efficient memory layouts. This is especially important when dealing with large fields. The performance of Taichi programs can benefit from a wisely-chosen field layout, and suffer from loosely organized buffers. 
+
+<!-- This section is organized as follows: we first introduce the pricinples, then play basic Taichi , and at last ... -->
 
 ### Basic Priniciples 
 The central principle of buffer organization is locality. 
@@ -67,7 +38,11 @@ efficient one on a specific task and computer architecture. -->
 
 ### Layout 101: from `shape` to `ti.root.X`
 
-The following declares a 0-D field:
+In basic usages, shape is regarded as an instant argument of field. However, advanced  organizations require more flexible descriptors, namely the `ti.root.X` statements.
+<!-- haidong: what's else optional in ti.root? -->
+Let's have some warmup practices to get formaliar to this set of statements. We strongly recommend that you write following code snippets in a Taichi environment.
+
+* Declare a 0-D field:
 
 ```python {1-2}
 x = ti.field(ti.f32)
@@ -76,7 +51,7 @@ ti.root.place(x)
 x = ti.field(ti.f32, shape=())
 ```
 
-The following declares a 1D field of shape `3`:
+* Declare a 1D field of length `3`:
 
 ```python {1-2}
 x = ti.field(ti.f32)
@@ -85,7 +60,7 @@ ti.root.dense(ti.i, 3).place(x)
 x = ti.field(ti.f32, shape=3)
 ```
 
-The following declares a 2D field of shape `(3, 4)`:
+* Declare a 2D field of shape `(3, 4)`:
 
 ```python {1-2}
 x = ti.field(ti.f32)
@@ -93,46 +68,39 @@ ti.root.dense(ti.ij, (3, 4)).place(x)
 # is equivalent to:
 x = ti.field(ti.f32, shape=(3, 4))
 ```
+You can also nest two 1D `dense` statements to describe the same 2D array.
+```python {1-2}
+x = ti.field(ti.f32)
+ti.root.dense(ti.i, 3).dense(ti.j, 4).place(x)
+```
 
-After being comfortable with these equivalent definitions, you can move forward
-and see how to change the data layout.
+In a nutshell, the `ti.root.X` statements gradually binds a shape to the corresponding axis.
+Nested statements can also compose a field with more dimensions.
 
 ### Row-major versus column-major
 
-As you might have learned in a computer architecture course,
-address spaces are linear in modern computers. To
-simplify the discussions, data type size will not be considered and will always
-be treated as 1. Assume the starting address of a field is `base`. Then for 1D
-Taichi fields, the address of the `i`-th element is simply `base + i`.
+As you might have learnt from a computer architecture course, memory address space is linear in modern computers. Without loss of generality, we ignore the differences in data types and always assume each data element has size 1. Denote the starting memory address of a field as `base`, the indexing formula for 1D Taichi fields is `base + i` for the `i`-th element.
 
-However, a multi-dimensional field has to be flattened in order to fit into the
-1D address space. For example, there are two ways to store a 2D field of size `(3, 2)`:
+For multi-dimensional fields, however, we have different ways to compound the indices from multiple dimensions into the linear memory adress space. Take a 2D field of shape `(M, N)` as an instance, we can either store `M` rows with 1D buffers of length `N`, say the row-major way, or store `N` columns in 1D buffers of length `M`, say the column-major way. The indexing formulas for the 2D `(i, j)`-th element are `base + i * N + j` for row-major and `base + j * M + i` for column-major, respectively. 
 
-- Row-major: let the address of the `(i, j)`-th element be `base + i * 2 + j`;
-- Column-major: let the address of the `(i, j)`-th element be
-  `base + j * 3 + i`.
+We can easily derive that the elements in the same row are closer in memory for row-major fields, and the columns are more compact for column-major fields. The decision to use which layout is mainly made by how the elements are accessed, namely, the access patterns. A commonly seen bad pattern is to frequently access elements of the same row in a column-major field, or the other way round.
 
-To specify which layout to use (default layout is row-major):
-
+The default Taichi field layout is row-major. With the `ti.root.dense` statement as we have practiced in the last section, the fields are defined as follows:
 ```python
-ti.root.dense(ti.i, 3).dense(ti.j, 2).place(x)   # row-major
-ti.root.dense(ti.j, 2).dense(ti.i, 3).place(y)   # column-major
+ti.root.dense(ti.i, M).dense(ti.j, N).place(x)   # row-major
+ti.root.dense(ti.j, N).dense(ti.i, M).place(y)   # column-major
 ```
-
-Both `x` and `y` have shape `(3, 2)`, and they can be accessed in the same
-manner with `x[i, j]` and `y[i, j]`, where `0 <= i < 3 && 0 <= j < 2`. However,
-they have different memory layouts:
-
+The axis denotion in the rightmost `dense` statement indicates the continous memory. For the `x` field, elements in the same row (same `i` and different `j`) are closer in memory, hence it's row-major; For the `y` field, elements in the same column (same `j` and different `i`) are closer in memory, hence it's column-major. With a case of (2, 3), we visualize the layouts of `x` and `y` in the memory as follows:
 ```
 # address:  low ........................................... high
 #       x:  x[0, 0]  x[0, 1]  x[1, 0]  x[1, 1]  x[2, 0]  x[2, 1]
 #       y:  y[0, 0]  y[1, 0]  y[2, 0]  y[0, 1]  y[1, 1]  y[2, 1]
 ```
 
+We specially note that the acessor is unified for Taichi fields: the `(i, j)`-th element in the field is accessed with the identical 2D index `x[i, j]` and `y[i, j]`. Taichi handles the layout variants internally and applies proper indexing equations. With this regard, the user can specify desired layout at definition, and use the fields with no awareness of underlying memory organizations. To change the layout, it's sufficient to swap the order of `dense` statements, and revise nothing in the later code sections.
+
 :::note
-
-For those who are familiar with C/C++, here is what they look like in C code:
-
+For readers who are familiar with C/C++, below is an example C code snippet that demonstrates data access in 2D arrays:
 ```c
 int x[3][2];  // row-major
 int y[2][3];  // column-major
@@ -145,9 +113,14 @@ for (int i = 0; i < 3; i++) {
 }
 ```
 
+The accessors of `x` and `y` are in reverse order for row-major arrays and colomn-major arrays, respectively. Compared with Taichi fields, there are much more code to revise when you change the memory layout.
+
 :::
 
-### Array of Structures (AoS) versus Structure of Arrays (SoA)
+<!-- ### Array of Structures (AoS) versus Structure of Arrays (SoA) -->
+### AOS versus SOA
+
+AOS means array of structures and SOA means structure of arrays. Consider an RGB image with 4 pixels and 3 color channels, the AOS layout stores `RGBRGBRGBRGB` in the memory and the SOA layout the image as `RRRRGGGGBBBB`.
 
 Fields of same shape can be placed together.
 
